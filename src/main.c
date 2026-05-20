@@ -169,6 +169,21 @@ static char *handle_files_post(http_request_line *req, http_headers *headers, co
 	return strdup(succ);
 }
 
+static bool validate_encoding(const char *encoding, const char *support_encoding) {
+	const char *p = encoding;
+	while (*p != '\0') {
+		while (*p == ' ' || *p == ',') p++;
+		if (*p == '\0') break;
+		const char *start = p;
+		while (*p != '\0' && *p != ',' && *p != ' ') p++;
+		if ((int)(p - start) == (int)strlen(support_encoding)
+			&& strncmp(start, support_encoding, p - start) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static char *handle_echo(const char *request_target, http_headers *headers) {
 	char buf[512] = {0};
 	const char *echo = request_target + strlen("/echo/");
@@ -176,7 +191,7 @@ static char *handle_echo(const char *request_target, http_headers *headers) {
 	header_entry *e = NULL;
 	len += snprintf(buf + len, sizeof(buf) - len, "HTTP/1.1 200 OK\r\n");
 	HASH_FIND_STR(headers->header_table, "Accept-Encoding", e);
-	if (e != NULL && strcmp(e->value, "gzip") == 0) {
+	if (e != NULL && validate_encoding(e->value, "gzip")) {
 		len += snprintf(buf + len, sizeof(buf) - len, "Content-Encoding: gzip\r\n");
 	}
 	len += snprintf(buf + len, sizeof(buf) - len, "Content-Type: text/plain\r\n");
