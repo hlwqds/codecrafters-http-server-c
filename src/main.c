@@ -138,6 +138,37 @@ static char *handle_files(const char *request_target, int *resp_len) {
 	return resp;
 }
 
+static char *handle_files_post(http_request_line *req, http_headers *headers, const char *body, int *resp_len) {
+	const char *filename = req->request_target + strlen("/files/");
+	char filename_buf[PATH_MAX];
+	sprintf(filename_buf, "%s/%s", directory, filename);
+	char file_buf[4096] = {0};
+	int fd = open(filename_buf, O_WRONLY | O_CREAT);
+	if (fd < 0) {
+		char *not_found = strdup("HTTP/1.1 404 Not Found\r\n\r\n");
+		*resp_len = strlen(not_found);
+		return not_found;
+	}
+	header_entry *e = NULL;
+	HASH_FIND_STR(headers->header_table, "Content-Length", e);
+	if (e != NULL) {
+		int len = atoi(e->value);
+		int written = 0;
+		while (true) {
+			int ret = write(fd, body + written, len - written);
+			if (ret < 0 || len == written) {
+				break;
+			}
+			written += ret;
+		}
+	}
+
+	close(fd);
+	char *succ = "HTTP/1.1 201 Created\r\n\r\n";
+	*resp_len = strlen(succ);
+	return strdup(succ);
+}
+
 static char *handle_echo(const char *request_target) {
 	char buf[512] = {0};
 	const char *echo = request_target + strlen("/echo/");
@@ -231,7 +262,12 @@ int main(int argc, char *argv[]) {
 				free(response);
 			} else if (strncmp(req->request_target, "/files/", strlen("/files/")) == 0) {
 				int resp_len = 0;
-				char *response = handle_files(req->request_target, &resp_len);
+				char *response = NULL;
+				if (strcmp(req->http_method, "POST") == 0) {
+					response = handle_files_post(req, headers, parsed, &resp_len);
+				} else {
+					response = handle_files(req->request_target, &resp_len);
+				}
 				send(conn, response, resp_len, 0);
 				free(response);
 			} else {
