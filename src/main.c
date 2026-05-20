@@ -1,3 +1,4 @@
+#include <linux/limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/socket.h>
@@ -7,7 +8,11 @@
 #include <errno.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include "uthash.h"
+#include <getopt.h>
 
 typedef struct {
 	char *http_method;
@@ -24,6 +29,8 @@ typedef struct {
 typedef struct {
 	header_entry *header_table;
 } http_headers;
+
+static char *directory = "";
 
 static const char *parse_http_request_line(const char *request, http_request_line **req_line) {
 	char *end = strstr(request, "\r\n");
@@ -98,6 +105,39 @@ static char *handle_user_agent(const http_headers *headers) {
 	return strdup(buf);
 }
 
+static char *handle_files(const char *request_target, int *resp_len) {
+	const char *filename = request_target + strlen("/files/");
+	char filename_buf[PATH_MAX];
+	sprintf(filename_buf, "%s/%s", directory, filename);
+	char file_buf[4096] = {0};
+	int fd = open(filename_buf, O_RDONLY);
+	if (fd < 0) {
+		char *not_found = strdup("HTTP/1.1 404 Not Found\r\n\r\n");
+		*resp_len = strlen(not_found);
+		return not_found;
+	}
+
+	int file_len = 0;
+	while (true) {
+		int ret = read(fd, file_buf + file_len, sizeof(file_buf) - file_len);
+		if (ret <= 0) break;
+		file_len += ret;
+	}
+	close(fd);
+
+	char header[256] = {0};
+	int hlen = snprintf(header, sizeof(header),
+		"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n",
+		file_len);
+
+	int total = hlen + file_len;
+	char *resp = malloc(total);
+	memcpy(resp, header, hlen);
+	memcpy(resp + hlen, file_buf, file_len);
+	*resp_len = total;
+	return resp;
+}
+
 static char *handle_echo(const char *request_target) {
 	char buf[512] = {0};
 	const char *echo = request_target + strlen("/echo/");
@@ -110,7 +150,12 @@ static char *handle_echo(const char *request_target) {
 	return strdup(buf);
 }
 
-int main() {
+static struct option long_options[] = {
+	{"directory", required_argument, 0, 'd'},
+	{0, 0, 0, 0},	
+};
+
+int main(int argc, char *argv[]) {
 	setbuf(stdout, NULL);
 	setbuf(stderr, NULL);
 
@@ -119,6 +164,16 @@ int main() {
 	int server_fd;
 	socklen_t client_addr_len;
 	struct sockaddr_in client_addr;
+
+	int opt;
+	while ((opt = getopt_long(argc, argv, "d:", long_options, NULL)) != -1) {
+		switch (opt) {
+			case 'd': {
+				directory = optarg;
+				break;
+			} 
+		}
+	}
 
 	server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_fd == -1) {
@@ -173,6 +228,11 @@ int main() {
 			} else if (strcmp(req->request_target, "/user-agent") == 0) {
 				char *response = handle_user_agent(headers);
 				send(conn, response, strlen(response), 0);
+				free(response);
+			} else if (strncmp(req->request_target, "/files/", strlen("/files/")) == 0) {
+				int resp_len = 0;
+				char *response = handle_files(req->request_target, &resp_len);
+				send(conn, response, resp_len, 0);
 				free(response);
 			} else {
 				send(conn, not_found, strlen(not_found), 0);
