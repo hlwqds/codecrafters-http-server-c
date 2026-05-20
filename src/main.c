@@ -291,39 +291,42 @@ int main(int argc, char *argv[]) {
 		int conn = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
 		printf("Client connected\n");
 		if (fork() == 0) {
-			char req_buf[1024] = {0};
-			read(conn, req_buf, sizeof(req_buf) - 1);
-			http_request_line *req = NULL;
-			const char *parsed = parse_http_request_line(req_buf, &req);
-			http_headers *headers = NULL;
-			parsed = parse_http_headers(parsed, &headers);
-			char *succ = "HTTP/1.1 200 OK\r\n\r\n";
-			char *not_found = "HTTP/1.1 404 Not Found\r\n\r\n";
-			if (strcmp(req->request_target, "/") == 0) {
-				send(conn, succ, strlen(succ), 0);
-			} else if (strncmp(req->request_target, "/echo/", strlen("/echo/")) == 0) {
-				int resp_len = 0;
-				char *response = handle_echo(req->request_target, headers, &resp_len);
-				send(conn, response, resp_len, 0);
-				free(response);
-			} else if (strcmp(req->request_target, "/user-agent") == 0) {
-				char *response = handle_user_agent(headers);
-				send(conn, response, strlen(response), 0);
-				free(response);
-			} else if (strncmp(req->request_target, "/files/", strlen("/files/")) == 0) {
-				int resp_len = 0;
-				char *response = NULL;
-				if (strcmp(req->http_method, "POST") == 0) {
-					response = handle_files_post(req, headers, parsed, &resp_len);
+			while (true) {
+				char req_buf[1024] = {0};
+				read(conn, req_buf, sizeof(req_buf) - 1);
+				http_request_line *req = NULL;
+				const char *parsed = parse_http_request_line(req_buf, &req);
+				http_headers *headers = NULL;
+				parsed = parse_http_headers(parsed, &headers);
+				char *succ = "HTTP/1.1 200 OK\r\n\r\n";
+				char *not_found = "HTTP/1.1 404 Not Found\r\n\r\n";
+				if (strcmp(req->request_target, "/") == 0) {
+					send(conn, succ, strlen(succ), 0);
+				} else if (strncmp(req->request_target, "/echo/", strlen("/echo/")) == 0) {
+					int resp_len = 0;
+					char *response = handle_echo(req->request_target, headers, &resp_len);
+					send(conn, response, resp_len, 0);
+					free(response);
+				} else if (strcmp(req->request_target, "/user-agent") == 0) {
+					char *response = handle_user_agent(headers);
+					send(conn, response, strlen(response), 0);
+					free(response);
+				} else if (strncmp(req->request_target, "/files/", strlen("/files/")) == 0) {
+					int resp_len = 0;
+					char *response = NULL;
+					if (strcmp(req->http_method, "POST") == 0) {
+						response = handle_files_post(req, headers, parsed, &resp_len);
+					} else {
+						response = handle_files(req->request_target, &resp_len);
+					}
+					send(conn, response, resp_len, 0);
+					free(response);
 				} else {
-					response = handle_files(req->request_target, &resp_len);
+					send(conn, not_found, strlen(not_found), 0);
 				}
-				send(conn, response, resp_len, 0);
-				free(response);
-			} else {
-				send(conn, not_found, strlen(not_found), 0);
+				free_headers(headers);			
 			}
-			free_headers(headers);
+
 			close(conn);
 			_exit(0);
 		}
