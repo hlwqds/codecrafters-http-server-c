@@ -43,6 +43,18 @@ static const char *parse_http_request_line(const char *request, http_request_lin
 	return end + 2;
 }
 
+static char *handle_echo(const char *request_target) {
+	char buf[512] = {0};
+	const char *echo = request_target + strlen("/echo/");
+	int len = 0;
+	len += snprintf(buf + len, sizeof(buf) - len, "HTTP/1.1 200 OK\r\n");
+	len += snprintf(buf + len, sizeof(buf) - len, "Content-Type: text/plain\r\n");
+	len += snprintf(buf + len, sizeof(buf) - len, "Content-Length: %lu\r\n", strlen(echo));
+	len += snprintf(buf + len, sizeof(buf) - len, "\r\n");
+	len += snprintf(buf + len, sizeof(buf) - len, "%s", echo);
+	return strdup(buf);
+}
+
 int main() {
 	// Disable output buffering
 	setbuf(stdout, NULL);
@@ -97,9 +109,13 @@ int main() {
 	 char *succ = "HTTP/1.1 200 OK\r\n\r\n";
 	 char *not_found = "HTTP/1.1 404 Not Found\r\n\r\n";
 	 if (strcmp(req->request_target, "/") == 0) {
-		 send(conn, succ, strlen(succ), 0);
+		send(conn, succ, strlen(succ), 0);
+	 } else if (strncmp(req->request_target, "/echo/", strlen("/echo/")) == 0) {
+	 	char *response = handle_echo(req->request_target);
+		send(conn, response, strlen(response), 0);
+		free(response);
 	 } else {
-		 send(conn, not_found, strlen(not_found), 0);
+		send(conn, not_found, strlen(not_found), 0);
 	 }
 	 printf("Client connected\n");
 	
