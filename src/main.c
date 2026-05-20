@@ -255,6 +255,7 @@ static char *handle_connection_close() {
 	char header[256] = {0};
 	int hlen = snprintf(header, sizeof(header), "HTTP/1.1 200 OK\r\n");
 	hlen += snprintf(header + hlen, sizeof(header) - hlen, "Content-Type: text/plain\r\n");
+	hlen += snprintf(header + hlen, sizeof(header) - hlen, "Content-Length: 0\r\n");
 	hlen += snprintf(header + hlen, sizeof(header) - hlen, "Connection: close\r\n");
 	hlen += snprintf(header + hlen, sizeof(header) - hlen, "\r\n");
 	return strdup(header);
