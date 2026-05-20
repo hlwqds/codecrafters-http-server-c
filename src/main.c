@@ -13,6 +13,8 @@
 #include <fcntl.h>
 #include "uthash.h"
 #include <getopt.h>
+#include <zconf.h>
+#include <zlib.h>
 
 typedef struct {
 	char *http_method;
@@ -184,21 +186,48 @@ static bool validate_encoding(const char *encoding, const char *support_encoding
 	return false;
 }
 
-static char *handle_echo(const char *request_target, http_headers *headers) {
-	char buf[512] = {0};
+static int gzip_compress(const char *src, int src_len, char **out) {
+	z_stream s = {0};
+	deflateInit2(&s, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY);
+	s.next_in = (Bytef *)src;
+	s.avail_in = src_len;
+	uLong dst_cap = deflateBound(&s, src_len);
+	*out = malloc(dst_cap);
+	s.next_out = (Bytef *)*out;
+	s.avail_out = dst_cap;
+	deflate(&s, Z_FINISH);
+	int total = s.total_out;
+	deflateEnd(&s);
+	return total;
+}
+
+static char *handle_echo(const char *request_target, http_headers *headers, int *resp_len) {
 	const char *echo = request_target + strlen("/echo/");
-	int len = 0;
+	int echo_len = strlen(echo);
+	char *compressed = NULL;
 	header_entry *e = NULL;
-	len += snprintf(buf + len, sizeof(buf) - len, "HTTP/1.1 200 OK\r\n");
 	HASH_FIND_STR(headers->header_table, "Accept-Encoding", e);
-	if (e != NULL && validate_encoding(e->value, "gzip")) {
-		len += snprintf(buf + len, sizeof(buf) - len, "Content-Encoding: gzip\r\n");
+	bool use_gzip = e != NULL && validate_encoding(e->value, "gzip");
+	if (use_gzip) {
+		echo_len = gzip_compress(echo, echo_len, &compressed);
+		echo = compressed;
 	}
-	len += snprintf(buf + len, sizeof(buf) - len, "Content-Type: text/plain\r\n");
-	len += snprintf(buf + len, sizeof(buf) - len, "Content-Length: %lu\r\n", strlen(echo));
-	len += snprintf(buf + len, sizeof(buf) - len, "\r\n");
-	len += snprintf(buf + len, sizeof(buf) - len, "%s", echo);
-	return strdup(buf);
+
+	char header[256] = {0};
+	int hlen = snprintf(header, sizeof(header), "HTTP/1.1 200 OK\r\n");
+	if (use_gzip) {
+		hlen += snprintf(header + hlen, sizeof(header) - hlen, "Content-Encoding: gzip\r\n");
+	}
+	hlen += snprintf(header + hlen, sizeof(header) - hlen,
+		"Content-Type: text/plain\r\nContent-Length: %d\r\n\r\n", echo_len);
+
+	int total = hlen + echo_len;
+	char *resp = malloc(total);
+	memcpy(resp, header, hlen);
+	memcpy(resp + hlen, echo, echo_len);
+	if (compressed) free(compressed);
+	*resp_len = total;
+	return resp;
 }
 
 static struct option long_options[] = {
@@ -273,8 +302,9 @@ int main(int argc, char *argv[]) {
 			if (strcmp(req->request_target, "/") == 0) {
 				send(conn, succ, strlen(succ), 0);
 			} else if (strncmp(req->request_target, "/echo/", strlen("/echo/")) == 0) {
-				char *response = handle_echo(req->request_target, headers);
-				send(conn, response, strlen(response), 0);
+				int resp_len = 0;
+				char *response = handle_echo(req->request_target, headers, &resp_len);
+				send(conn, response, resp_len, 0);
 				free(response);
 			} else if (strcmp(req->request_target, "/user-agent") == 0) {
 				char *response = handle_user_agent(headers);
