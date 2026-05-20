@@ -235,6 +235,31 @@ static struct option long_options[] = {
 	{0, 0, 0, 0},	
 };
 
+static bool check_connection_close_in_headers(http_headers *header) {
+	if (header == NULL) {
+		return false;
+	}
+	header_entry *e = NULL;
+	HASH_FIND_STR(header->header_table, "Connection", e);
+	if (e == NULL) {
+		return false;
+	}
+
+	if (strcmp(e->value, "close") == 0) {
+		return true;
+	}
+	return false;
+}
+
+static char *handle_connection_close() {
+	char header[256] = {0};
+	int hlen = snprintf(header, sizeof(header), "HTTP/1.1 200 OK\r\n");
+	hlen += snprintf(header + hlen, sizeof(header) - hlen, "Content-Type: text/plain\r\n");
+	hlen += snprintf(header + hlen, sizeof(header) - hlen, "Connection: close\r\n");
+	hlen += snprintf(header + hlen, sizeof(header) - hlen, "\r\n");
+	return strdup(header);
+}
+
 int main(int argc, char *argv[]) {
 	setbuf(stdout, NULL);
 	setbuf(stderr, NULL);
@@ -298,6 +323,13 @@ int main(int argc, char *argv[]) {
 				const char *parsed = parse_http_request_line(req_buf, &req);
 				http_headers *headers = NULL;
 				parsed = parse_http_headers(parsed, &headers);
+				if (check_connection_close_in_headers(headers)) {
+					char *response = handle_connection_close();
+					send(conn, response, strlen(response), 0);
+					free(response);
+					free_headers(headers);
+					break;
+				}
 				char *succ = "HTTP/1.1 200 OK\r\n\r\n";
 				char *not_found = "HTTP/1.1 404 Not Found\r\n\r\n";
 				if (strcmp(req->request_target, "/") == 0) {
