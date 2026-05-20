@@ -7,6 +7,42 @@
 #include <errno.h>
 #include <unistd.h>
 
+typedef struct {
+	char *http_method;
+	char *request_target;
+	char *version;	
+} http_request_line;
+
+static const char *parse_http_request_line(const char *request, http_request_line **req_line) {
+	char *end = strstr(request, "\r\n");
+	if (end == NULL) {
+		*req_line = NULL;
+		return request;
+	}
+	*req_line = calloc(1, sizeof(http_request_line));
+	char buf[256] = {0};
+	int step = 0;
+	const char *p = request;
+	while (p < end) {
+		const char *start = p;
+		while (p < end && *p != ' ') {
+			p++;
+		}
+		strncpy(buf, start, p - start);
+		if (p < end) p++;
+		if (step == 0) {
+			(*req_line)->http_method = strdup(buf);
+		} else if (step == 1) {
+			(*req_line)->request_target = strdup(buf);
+		} else if (step == 2) {
+			(*req_line)->version = strdup(buf);
+		}
+		step++;
+		memset(buf, 0, sizeof(buf));
+	}
+	return end + 2;
+}
+
 int main() {
 	// Disable output buffering
 	setbuf(stdout, NULL);
@@ -54,8 +90,17 @@ int main() {
 	 client_addr_len = sizeof(client_addr);
 	
 	 int conn = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
-	 char *buf = "HTTP/1.1 200 OK\r\n\r\n";
-	 send(conn, buf, strlen(buf), 0);
+	 char req_buf[1024];
+	 read(conn, req_buf, sizeof(req_buf));
+	 http_request_line *req = NULL;
+	 parse_http_request_line(req_buf, &req);
+	 char *succ = "HTTP/1.1 200 OK\r\n\r\n";
+	 char *not_found = "HTTP/1.1 404 Not Found\r\n\r\n";
+	 if (strcmp(req->request_target, "/") == 0) {
+		 send(conn, succ, strlen(succ), 0);
+	 } else {
+		 send(conn, not_found, strlen(not_found), 0);
+	 }
 	 printf("Client connected\n");
 	
 	 close(server_fd);
