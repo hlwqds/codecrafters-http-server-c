@@ -169,11 +169,16 @@ static char *handle_files_post(http_request_line *req, http_headers *headers, co
 	return strdup(succ);
 }
 
-static char *handle_echo(const char *request_target) {
+static char *handle_echo(const char *request_target, http_headers *headers) {
 	char buf[512] = {0};
 	const char *echo = request_target + strlen("/echo/");
 	int len = 0;
+	header_entry *e = NULL;
 	len += snprintf(buf + len, sizeof(buf) - len, "HTTP/1.1 200 OK\r\n");
+	HASH_FIND_STR(headers->header_table, "Accept-Encoding", e);
+	if (e != NULL && strcmp(e->value, "gzip") == 0) {
+		len += snprintf(buf + len, sizeof(buf) - len, "Content-Encoding: gzip\r\n");
+	}
 	len += snprintf(buf + len, sizeof(buf) - len, "Content-Type: text/plain\r\n");
 	len += snprintf(buf + len, sizeof(buf) - len, "Content-Length: %lu\r\n", strlen(echo));
 	len += snprintf(buf + len, sizeof(buf) - len, "\r\n");
@@ -253,7 +258,7 @@ int main(int argc, char *argv[]) {
 			if (strcmp(req->request_target, "/") == 0) {
 				send(conn, succ, strlen(succ), 0);
 			} else if (strncmp(req->request_target, "/echo/", strlen("/echo/")) == 0) {
-				char *response = handle_echo(req->request_target);
+				char *response = handle_echo(req->request_target, headers);
 				send(conn, response, strlen(response), 0);
 				free(response);
 			} else if (strcmp(req->request_target, "/user-agent") == 0) {
