@@ -12,7 +12,7 @@
 typedef struct {
 	char *http_method;
 	char *request_target;
-	char *version;	
+	char *version;
 } http_request_line;
 
 typedef struct {
@@ -111,16 +111,13 @@ static char *handle_echo(const char *request_target) {
 }
 
 int main() {
-	// Disable output buffering
 	setbuf(stdout, NULL);
- 	setbuf(stderr, NULL);
+	setbuf(stderr, NULL);
 
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	printf("Logs from your program will appear here!\n");
 
-	// TODO: Uncomment the code below to pass the first stage
-
-	int server_fd, client_addr_len;
+	int server_fd;
+	socklen_t client_addr_len;
 	struct sockaddr_in client_addr;
 
 	server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -129,18 +126,17 @@ int main() {
 		return 1;
 	}
 
-	// Since the tester restarts your program quite often, setting SO_REUSEADDR
-	// ensures that we don't run into 'Address already in use' errors
 	int reuse = 1;
 	if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
 		printf("SO_REUSEADDR failed: %s \n", strerror(errno));
 		return 1;
 	}
 
-	struct sockaddr_in serv_addr = { .sin_family = AF_INET ,
-								 .sin_port = htons(4221),
-								 .sin_addr = { htonl(INADDR_ANY) },
-								};
+	struct sockaddr_in serv_addr = {
+		.sin_family = AF_INET,
+		.sin_port = htons(4221),
+		.sin_addr = { htonl(INADDR_ANY) },
+	};
 
 	if (bind(server_fd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) != 0) {
 		printf("Bind failed: %s \n", strerror(errno));
@@ -156,33 +152,38 @@ int main() {
 	printf("Waiting for a client to connect...\n");
 	client_addr_len = sizeof(client_addr);
 
-	int conn = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
-	char req_buf[1024];
-	read(conn, req_buf, sizeof(req_buf));
-	http_request_line *req = NULL;
-	const char *parsed = parse_http_request_line(req_buf, &req);
-	http_headers *headers = NULL;
-	parsed = parse_http_headers(parsed, &headers);
-	char *succ = "HTTP/1.1 200 OK\r\n\r\n";
-	char *not_found = "HTTP/1.1 404 Not Found\r\n\r\n";
-	if (strcmp(req->request_target, "/") == 0) {
-		send(conn, succ, strlen(succ), 0);
-	} else if (strncmp(req->request_target, "/echo/", strlen("/echo/")) == 0) {
-		char *response = handle_echo(req->request_target);
-		send(conn, response, strlen(response), 0);
-		free(response);
-	} else if (strcmp(req->request_target, "/user-agent") == 0) {
-		char *response = handle_user_agent(headers);
-		send(conn, response, strlen(response), 0);
-		free(response);
-	} else {
-		send(conn, not_found, strlen(not_found), 0);
+	while (true) {
+		int conn = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
+		printf("Client connected\n");
+		if (fork() == 0) {
+			char req_buf[1024] = {0};
+			read(conn, req_buf, sizeof(req_buf) - 1);
+			http_request_line *req = NULL;
+			const char *parsed = parse_http_request_line(req_buf, &req);
+			http_headers *headers = NULL;
+			parsed = parse_http_headers(parsed, &headers);
+			char *succ = "HTTP/1.1 200 OK\r\n\r\n";
+			char *not_found = "HTTP/1.1 404 Not Found\r\n\r\n";
+			if (strcmp(req->request_target, "/") == 0) {
+				send(conn, succ, strlen(succ), 0);
+			} else if (strncmp(req->request_target, "/echo/", strlen("/echo/")) == 0) {
+				char *response = handle_echo(req->request_target);
+				send(conn, response, strlen(response), 0);
+				free(response);
+			} else if (strcmp(req->request_target, "/user-agent") == 0) {
+				char *response = handle_user_agent(headers);
+				send(conn, response, strlen(response), 0);
+				free(response);
+			} else {
+				send(conn, not_found, strlen(not_found), 0);
+			}
+			free_headers(headers);
+			close(conn);
+			_exit(0);
+		}
+		close(conn);
 	}
-	free_headers(headers);
-	printf("Client connected\n");
-
 	close(server_fd);
 
 	return 0;
 }
-
